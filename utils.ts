@@ -101,6 +101,8 @@ export const attestedEventSignature =
 
 export const makeStatementUID =
   "0x3969bb076acfb992af54d51274c5c868641ca5344e1aacd0b1f5e4f80ac0822f";
+export const likeUID =
+  "0x33e9094830a5cba5554d1954310e4fbed2ef5f859ec1404619adea4207f391fd";
 
 export const provider = new ethers.providers.StaticJsonRpcProvider(
   activeChainConfig.rpcProvider,
@@ -184,12 +186,22 @@ export async function getFormattedAttestationFromLog(
 export async function revokeAttestationsFromLogs(logs: ethers.providers.Log[]) {
   for (let log of logs) {
     const attestation = await easContract.getAttestation(log.data);
-    await prisma.post.update({
-      where: { id: attestation.uid },
-      data: {
-        revokedAt: attestation.revocationTime.toNumber(),
-      },
-    });
+
+    if (attestation.schema === makeStatementUID) {
+      await prisma.post.update({
+        where: { id: attestation.uid },
+        data: {
+          revokedAt: attestation.revocationTime.toNumber(),
+        },
+      });
+    } else if (attestation.schema === likeUID) {
+      await prisma.like.update({
+        where: { id: attestation.uid },
+        data: {
+          revokedAt: attestation.revocationTime.toNumber(),
+        },
+      });
+    }
   }
 }
 
@@ -210,12 +222,48 @@ export async function parseAttestationLogs(logs: ethers.providers.Log[]) {
 export async function processCreatedAttestation(
   attestation: Attestation
 ): Promise<void> {
+  if (attestation.schemaId === likeUID) {
+    try {
+      const attestingUser = await prisma.user.findUnique({
+        where: { id: attestation.attester },
+      });
+
+      if (!attestingUser) {
+        console.log("Creating new user", attestation.attester);
+
+        await prisma.user.create({
+          data: {
+            id: attestation.attester,
+            name: "",
+            createdAt: attestation.time,
+          },
+        });
+      }
+
+      const postToLike = await prisma.post.findUnique({
+        where: { id: attestation.refUID },
+      });
+
+      if (postToLike) {
+        await prisma.like.create({
+          data: {
+            id: attestation.id,
+            postId: attestation.refUID,
+            userId: attestation.attester,
+            createdAt: attestation.time,
+            revokedAt: 0,
+          },
+        });
+      }
+    } catch (error) {
+      console.log("Error processing like attestation", error);
+    }
+  }
+
   if (attestation.schemaId === makeStatementUID) {
     try {
-      const decodedNameAttestationData = ethers.utils.defaultAbiCoder.decode(
-        ["string"],
-        attestation.data
-      );
+      const decodedStatementAttestationData =
+        ethers.utils.defaultAbiCoder.decode(["string"], attestation.data);
 
       const attestingUser = await prisma.user.findUnique({
         where: { id: attestation.attester },
@@ -266,7 +314,7 @@ export async function processCreatedAttestation(
           userId: attestation.attester,
           createdAt: attestation.time,
           recipientId: attestation.recipient,
-          content: decodedNameAttestationData[0],
+          content: decodedStatementAttestationData[0],
           id: attestation.id,
           parentId,
           revokedAt: 0,
@@ -347,7 +395,7 @@ export async function getAndUpdateLatestAttestations() {
       ethers.utils.id(attestedEventSignature),
       null,
       null,
-      makeStatementUID,
+      [makeStatementUID, likeUID],
     ],
   });
 
@@ -390,7 +438,7 @@ export async function updateDbFromRelevantLog(log: ethers.providers.Log) {
   if (log.address === EASContractAddress) {
     if (
       log.topics[0] === ethers.utils.id(attestedEventSignature) &&
-      log.topics[3] === makeStatementUID
+      [makeStatementUID, likeUID].includes(log.topics[3])
     ) {
       await parseAttestationLogs([log]);
       await updateServiceStatToLastBlock(
@@ -400,7 +448,7 @@ export async function updateDbFromRelevantLog(log: ethers.providers.Log) {
       );
     } else if (
       log.topics[0] === ethers.utils.id(revokedEventSignature) &&
-      log.topics[3] === makeStatementUID
+      [makeStatementUID, likeUID].includes(log.topics[3])
     ) {
       await revokeAttestationsFromLogs([log]);
       await updateServiceStatToLastBlock(
