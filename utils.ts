@@ -37,7 +37,7 @@ export const EAS_CHAIN_CONFIGS: EASChainConfig[] = [
     schemaRegistryAddress: "0x0a7E2Ff54e76B8E6659aedc9103FB21c038050D0",
     etherscanURL: "https://sepolia.etherscan.io",
     contractStartBlock: 2958570,
-    rpcProvider: `https://sepolia.infura.io/v3/${process.env.INFURA_API_KEY}`,
+    rpcProvider: `https://eth-sepolia.g.alchemy.com/v2/${process.env.ALCHEMY_SEPOLIA_API_KEY}`,
   },
   {
     chainId: 42161,
@@ -228,7 +228,7 @@ export async function processCreatedAttestation(
           data: {
             id: attestation.attester,
             name: "",
-            createdAt: dayjs().unix(),
+            createdAt: attestation.time,
           },
         });
       }
@@ -244,7 +244,7 @@ export async function processCreatedAttestation(
           data: {
             id: attestation.recipient,
             name: "",
-            createdAt: dayjs().unix(),
+            createdAt: attestation.time,
           },
         });
       }
@@ -264,7 +264,7 @@ export async function processCreatedAttestation(
       await prisma.post.create({
         data: {
           userId: attestation.attester,
-          createdAt: dayjs().unix(),
+          createdAt: attestation.time,
           recipientId: attestation.recipient,
           content: decodedNameAttestationData[0],
           id: attestation.id,
