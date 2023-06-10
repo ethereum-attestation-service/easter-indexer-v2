@@ -154,15 +154,6 @@ export async function getFormattedAttestationFromLog(
     tries++;
   } while (UID === ethers.constants.HashZero);
 
-  let decodedDataJson = "";
-
-  try {
-    const schemaEncoder = new SchemaEncoder("string message");
-    decodedDataJson = JSON.stringify(schemaEncoder.decodeData(data));
-  } catch (error) {
-    console.log("Error decoding data 53432", error);
-  }
-
   return {
     id: UID,
     schemaId: schemaUID,
@@ -179,7 +170,6 @@ export async function getFormattedAttestationFromLog(
     ipfsHash: "",
     timeCreated: dayjs().unix(),
     revocable,
-    decodedDataJson,
   };
 }
 
@@ -245,6 +235,7 @@ export async function processCreatedAttestation(
       });
 
       if (postToLike) {
+        console.log("Creating new like", attestation.id);
         await prisma.like.create({
           data: {
             id: attestation.id,
@@ -343,7 +334,7 @@ export async function getAndUpdateLatestAttestationRevocations() {
       ethers.utils.id(revokedEventSignature),
       null,
       null,
-      makeStatementUID,
+      [makeStatementUID, likeUID],
     ],
   });
 
