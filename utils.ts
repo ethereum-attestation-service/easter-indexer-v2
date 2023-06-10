@@ -105,6 +105,8 @@ export const likeUID =
   "0x33e9094830a5cba5554d1954310e4fbed2ef5f859ec1404619adea4207f391fd";
 export const usernameUID =
   "0x1c12bac4f230477c87449a101f5f9d6ca1c492866355c0a5e27026753e5ebf40";
+export const followUID =
+  "0x4915a98a3dc10c71027c01e59cb39415d4c04fdcdde539d6d04fc812af86d8dd";
 
 export const provider = new ethers.providers.StaticJsonRpcProvider(
   activeChainConfig.rpcProvider,
@@ -188,6 +190,13 @@ export async function revokeAttestationsFromLogs(logs: ethers.providers.Log[]) {
       });
     } else if (attestation.schema === likeUID) {
       await prisma.like.update({
+        where: { id: attestation.uid },
+        data: {
+          revokedAt: attestation.revocationTime.toNumber(),
+        },
+      });
+    } else if (attestation.schema === followUID) {
+      await prisma.follow.update({
         where: { id: attestation.uid },
         data: {
           revokedAt: attestation.revocationTime.toNumber(),
@@ -320,6 +329,34 @@ export async function processCreatedAttestation(
       console.log("Error: Unable to decode schema name", e);
       return;
     }
+  } else if (attestation.schemaId === followUID) {
+    try {
+      const decodedUsernameAttestationData =
+        ethers.utils.defaultAbiCoder.decode(["bool"], attestation.data);
+
+      const existingFollow = await prisma.follow.findFirst({
+        where: {
+          followerId: attestation.attester,
+          followingId: attestation.recipient,
+          revokedAt: 0,
+        },
+      });
+
+      if (!existingFollow) {
+        await prisma.follow.create({
+          data: {
+            id: attestation.id,
+            followerId: attestation.attester,
+            followingId: attestation.recipient,
+            createdAt: attestation.time,
+            revokedAt: 0,
+          },
+        });
+      }
+    } catch (e) {
+      console.log("Error: Unable to decode schema name", e);
+      return;
+    }
   }
 }
 
@@ -339,7 +376,7 @@ export async function getAndUpdateLatestAttestationRevocations() {
       ethers.utils.id(revokedEventSignature),
       null,
       null,
-      [makeStatementUID, likeUID],
+      [makeStatementUID, likeUID, followUID],
     ],
   });
 
@@ -391,7 +428,7 @@ export async function getAndUpdateLatestAttestations() {
       ethers.utils.id(attestedEventSignature),
       null,
       null,
-      [makeStatementUID, likeUID, usernameUID],
+      [makeStatementUID, likeUID, usernameUID, followUID],
     ],
   });
 
@@ -434,7 +471,9 @@ export async function updateDbFromRelevantLog(log: ethers.providers.Log) {
   if (log.address === EASContractAddress) {
     if (
       log.topics[0] === ethers.utils.id(attestedEventSignature) &&
-      [makeStatementUID, likeUID, usernameUID].includes(log.topics[3])
+      [makeStatementUID, likeUID, usernameUID, followUID].includes(
+        log.topics[3]
+      )
     ) {
       await parseAttestationLogs([log]);
       await updateServiceStatToLastBlock(
@@ -444,7 +483,7 @@ export async function updateDbFromRelevantLog(log: ethers.providers.Log) {
       );
     } else if (
       log.topics[0] === ethers.utils.id(revokedEventSignature) &&
-      [makeStatementUID, likeUID].includes(log.topics[3])
+      [makeStatementUID, likeUID, followUID].includes(log.topics[3])
     ) {
       await revokeAttestationsFromLogs([log]);
       await updateServiceStatToLastBlock(
