@@ -1,9 +1,9 @@
 import { prisma } from "./db.server";
 import { ethers } from "ethers";
-import { Attestation, Schema } from "@prisma/client";
+import { Attestation } from "@prisma/client";
 import dayjs from "dayjs";
 import pLimit from "p-limit";
-import { Eas__factory, EasSchema__factory } from "./types/ethers-contracts";
+import { Eas__factory } from "./types/ethers-contracts";
 import { SchemaEncoder } from "@ethereum-attestation-service/eas-sdk";
 
 const limit = pLimit(5);
@@ -28,17 +28,6 @@ if (!CHAIN_ID) {
 }
 
 export const EAS_CHAIN_CONFIGS: EASChainConfig[] = [
-  // {
-  //   chainId: 11155111,
-  //   chainName: "Sepolia",
-  //   subdomain: "",
-  //   version: "0.25",
-  //   contractAddress: "0x25E36ebB051ae76c0D59E6c1dD0b29A5fc520061",
-  //   schemaRegistryAddress: "0x4dd8b988B64A4052B5f142Af845AA49D2B2cD10D",
-  //   etherscanURL: "https://sepolia.etherscan.io",
-  //   contractStartBlock: 2825261,
-  //   rpcProvider: "https://rpc.sepolia.ethpandaops.io/",
-  // },
   {
     chainId: 11155111,
     chainName: "sepolia",
@@ -105,26 +94,17 @@ if (!activeChainConfig) {
 }
 
 export const EASContractAddress = activeChainConfig.contractAddress;
-export const EASSchemaRegistryAddress = activeChainConfig.schemaRegistryAddress;
 export const CONTRACT_START_BLOCK = activeChainConfig.contractStartBlock;
 export const revokedEventSignature = "Revoked(address,address,bytes32,bytes32)";
-export const revokedOffchainEventSignature =
-  "RevokedOffchain(address,bytes32,uint64)";
 export const attestedEventSignature =
   "Attested(address,address,bytes32,bytes32)";
-export const registeredEventSignature = "Registered(bytes32,address)";
-export const timestampEventSignature = "Timestamped(bytes32,uint64)";
-export const schemaNameUID =
-  "0x44d562ac1d7cd77e232978687fea027ace48f719cf1d58c7888e509663bb87fc"; // Sepolia v0.25
+
+export const makeStatementUID =
+  "0x3969bb076acfb992af54d51274c5c868641ca5344e1aacd0b1f5e4f80ac0822f";
 
 export const provider = new ethers.providers.StaticJsonRpcProvider(
   activeChainConfig.rpcProvider,
   activeChainConfig.chainId
-);
-
-const schemaContract = EasSchema__factory.connect(
-  EASSchemaRegistryAddress,
-  provider
 );
 
 const easContract = Eas__factory.connect(EASContractAddress, provider);
@@ -175,11 +155,7 @@ export async function getFormattedAttestationFromLog(
   let decodedDataJson = "";
 
   try {
-    const schema = await prisma.schema.findUnique({
-      where: { id: schemaUID },
-    });
-
-    const schemaEncoder = new SchemaEncoder(schema!.schema);
+    const schemaEncoder = new SchemaEncoder("string message");
     decodedDataJson = JSON.stringify(schemaEncoder.decodeData(data));
   } catch (error) {
     console.log("Error decoding data 53432", error);
@@ -205,74 +181,19 @@ export async function getFormattedAttestationFromLog(
   };
 }
 
-export async function getFormattedSchemaFromLog(
-  log: ethers.providers.Log
-): Promise<Omit<Schema, "index">> {
-  let UID = ethers.constants.HashZero;
-  let resolver = ethers.constants.AddressZero;
-  let revocable = false;
-  let schema = "";
-
-  let tries = 1;
-
-  do {
-    [UID, resolver, revocable, schema] = await schemaContract.getSchema(
-      log.topics[1]
-    );
-
-    if (UID === ethers.constants.HashZero) {
-      console.log(`Delaying schema poll after try #${tries}...`);
-      await timeout(500);
-    }
-
-    tries++;
-  } while (UID === ethers.constants.HashZero);
-
-  const block = await provider.getBlock(log.blockNumber);
-  const tx = await provider.getTransaction(log.transactionHash);
-
-  return {
-    id: UID,
-    schema: schema,
-    creator: tx.from,
-    resolver,
-    time: block.timestamp,
-    txid: log.transactionHash,
-    revocable,
-  };
-}
-
 export async function revokeAttestationsFromLogs(logs: ethers.providers.Log[]) {
   for (let log of logs) {
     const attestation = await easContract.getAttestation(log.data);
-    await prisma.attestation.update({
-      where: { id: attestation[0] },
+    await prisma.post.update({
+      where: { id: attestation.uid },
       data: {
-        revoked: true,
-        revocationTime: attestation.revocationTime.toNumber(),
+        revokedAt: attestation.revocationTime.toNumber(),
       },
     });
   }
 }
 
-export async function createSchemasFromLogs(logs: ethers.providers.Log[]) {
-  const promises = logs.map((log) =>
-    limit(() => getFormattedSchemaFromLog(log))
-  );
-
-  const schemas = await Promise.all(promises);
-
-  for (let schema of schemas) {
-    const schemaCount = await prisma.schema.count();
-
-    console.log("Creating new schema", schema);
-    await prisma.schema.create({
-      data: { ...schema, index: (schemaCount + 1).toString() },
-    });
-  }
-}
-
-export async function createAttestationsForLogs(logs: ethers.providers.Log[]) {
+export async function parseAttestationLogs(logs: ethers.providers.Log[]) {
   const promises = logs.map((log) =>
     limit(() => getFormattedAttestationFromLog(log))
   );
@@ -280,90 +201,75 @@ export async function createAttestationsForLogs(logs: ethers.providers.Log[]) {
   const attestations = await Promise.all(promises);
 
   for (let attestation of attestations) {
-    console.log("Creating new attestation", attestation);
+    console.log("Adding new attestation", attestation);
 
-    await prisma.attestation.create({ data: attestation });
     await processCreatedAttestation(attestation);
-  }
-}
-
-export async function createOffchainRevocationsForLogs(
-  logs: ethers.providers.Log[]
-) {
-  for (let log of logs) {
-    const uid = log.topics[2];
-    const timestamp = ethers.BigNumber.from(log.topics[3]).toNumber();
-    console.log("Creating new offchainrevoke Log for", uid, timestamp);
-
-    const tx = await provider.getTransaction(log.transactionHash);
-
-    const newRevocation = await prisma.offchainRevocation.create({
-      data: {
-        timestamp,
-        uid,
-        from: tx.from,
-        txid: log.transactionHash,
-      },
-    });
-
-    await prisma.attestation.updateMany({
-      where: { id: uid, isOffchain: true, attester: tx.from },
-      data: {
-        revoked: true,
-        revocationTime: newRevocation.timestamp,
-      },
-    });
-  }
-}
-
-export async function createTimestampForLogs(logs: ethers.providers.Log[]) {
-  for (let log of logs) {
-    const uid = log.topics[1];
-    const timestamp = ethers.BigNumber.from(log.topics[2]).toNumber();
-    console.log("Creating new Log for", uid, timestamp);
-
-    const tx = await provider.getTransaction(log.transactionHash);
-
-    await prisma.timestamp.create({
-      data: {
-        id: uid,
-        timestamp,
-        from: tx.from,
-        txid: log.transactionHash,
-      },
-    });
   }
 }
 
 export async function processCreatedAttestation(
   attestation: Attestation
 ): Promise<void> {
-  if (attestation.schemaId === schemaNameUID) {
+  if (attestation.schemaId === makeStatementUID) {
     try {
       const decodedNameAttestationData = ethers.utils.defaultAbiCoder.decode(
-        ["bytes32", "string"],
+        ["string"],
         attestation.data
       );
 
-      const schema = await prisma.schema.findUnique({
-        where: { id: decodedNameAttestationData[0] },
+      const attestingUser = await prisma.user.findUnique({
+        where: { id: attestation.attester },
       });
 
-      if (!schema) {
-        console.log("Error: Schema doesnt exist!");
-        return;
+      if (!attestingUser) {
+        console.log("Creating new user", attestation.attester);
+
+        await prisma.user.create({
+          data: {
+            id: attestation.attester,
+            name: "",
+            createdAt: dayjs().unix(),
+          },
+        });
       }
 
-      console.log("Adding new schema name: ", decodedNameAttestationData[1]);
+      const recipientUser = await prisma.user.findUnique({
+        where: { id: attestation.recipient },
+      });
 
-      await prisma.schemaName.create({
+      if (!recipientUser) {
+        console.log("Creating new user", attestation.recipient);
+
+        await prisma.user.create({
+          data: {
+            id: attestation.recipient,
+            name: "",
+            createdAt: dayjs().unix(),
+          },
+        });
+      }
+
+      let parentId: null | string = null;
+
+      if (attestation.refUID !== ethers.constants.HashZero) {
+        const parentPost = await prisma.post.findUnique({
+          where: { id: attestation.refUID },
+        });
+
+        if (parentPost) {
+          parentId = parentPost.id;
+        }
+      }
+
+      await prisma.post.create({
         data: {
-          name: decodedNameAttestationData[1],
-          schemaId: schema.id,
-          time: dayjs().unix(),
-          attesterAddress: attestation.attester,
-          isCreator:
-            attestation.attester.toLowerCase() === schema.creator.toLowerCase(),
+          userId: attestation.attester,
+          createdAt: dayjs().unix(),
+          recipientId: attestation.recipient,
+          content: decodedNameAttestationData[0],
+          id: attestation.id,
+          parentId,
+          revokedAt: 0,
         },
       });
     } catch (e) {
@@ -385,7 +291,12 @@ export async function getAndUpdateLatestAttestationRevocations() {
   const logs = await provider.getLogs({
     address: EASContractAddress,
     fromBlock: fromBlock + 1,
-    topics: [ethers.utils.id(revokedEventSignature)],
+    topics: [
+      ethers.utils.id(revokedEventSignature),
+      null,
+      null,
+      makeStatementUID,
+    ],
   });
 
   await revokeAttestationsFromLogs(logs);
@@ -420,62 +331,6 @@ export async function updateServiceStatToLastBlock(
   }
 }
 
-export async function getAndUpdateLatestTimestamps() {
-  const serviceStatPropertyName = "latestTimestampBlockNum";
-
-  const { latestBlockNumServiceStat, fromBlock } = await getStartData(
-    serviceStatPropertyName
-  );
-
-  console.log(`Timestamp update starting from block ${fromBlock}`);
-
-  const logs = await provider.getLogs({
-    address: EASContractAddress,
-    fromBlock: fromBlock + 1,
-    topics: [ethers.utils.id(timestampEventSignature)],
-  });
-
-  await createTimestampForLogs(logs);
-
-  const lastBlock = getLastBlockNumberFromLog(logs);
-
-  await updateServiceStatToLastBlock(
-    !latestBlockNumServiceStat,
-    serviceStatPropertyName,
-    lastBlock
-  );
-
-  console.log(`New Timestamps: ${logs.length}`);
-}
-
-export async function getAndUpdateLatestOffchainRevocations() {
-  const serviceStatPropertyName = "latestOffchainRevocationBlockNum";
-
-  const { latestBlockNumServiceStat, fromBlock } = await getStartData(
-    serviceStatPropertyName
-  );
-
-  console.log(`Offchain revocation update starting from block ${fromBlock}`);
-
-  const logs = await provider.getLogs({
-    address: EASContractAddress,
-    fromBlock: fromBlock + 1,
-    topics: [ethers.utils.id(revokedOffchainEventSignature)],
-  });
-
-  await createOffchainRevocationsForLogs(logs);
-
-  const lastBlock = getLastBlockNumberFromLog(logs);
-
-  await updateServiceStatToLastBlock(
-    !latestBlockNumServiceStat,
-    serviceStatPropertyName,
-    lastBlock
-  );
-
-  console.log(`New Revocations Offchain: ${logs.length}`);
-}
-
 export async function getAndUpdateLatestAttestations() {
   const serviceStatPropertyName = "latestAttestationBlockNum";
 
@@ -488,10 +343,15 @@ export async function getAndUpdateLatestAttestations() {
   const logs = await provider.getLogs({
     address: EASContractAddress,
     fromBlock: fromBlock + 1,
-    topics: [ethers.utils.id(attestedEventSignature)],
+    topics: [
+      ethers.utils.id(attestedEventSignature),
+      null,
+      null,
+      makeStatementUID,
+    ],
   });
 
-  await createAttestationsForLogs(logs);
+  await parseAttestationLogs(logs);
 
   const lastBlock = getLastBlockNumberFromLog(logs);
 
@@ -526,73 +386,26 @@ export function getLastBlockNumberFromLog(logs: ethers.providers.Log[]) {
   return logs.length ? logs[logs.length - 1].blockNumber : 0;
 }
 
-export async function getAndUpdateLatestSchemas() {
-  const serviceStatPropertyName = "latestSchemaBlockNum";
-
-  const { latestBlockNumServiceStat, fromBlock } = await getStartData(
-    serviceStatPropertyName
-  );
-
-  console.log(`Schema update starting from block ${fromBlock}`);
-
-  const logs = await provider.getLogs({
-    address: EASSchemaRegistryAddress,
-    fromBlock: fromBlock + 1,
-    topics: [ethers.utils.id(registeredEventSignature)],
-  });
-
-  await createSchemasFromLogs(logs);
-
-  const lastBlock = getLastBlockNumberFromLog(logs);
-
-  await updateServiceStatToLastBlock(
-    !latestBlockNumServiceStat,
-    serviceStatPropertyName,
-    lastBlock
-  );
-
-  console.log(`New schemas: ${logs.length}`);
-}
-
 export async function updateDbFromRelevantLog(log: ethers.providers.Log) {
-  if (log.address === EASSchemaRegistryAddress) {
-    if (log.topics[0] === ethers.utils.id(registeredEventSignature)) {
-      await createSchemasFromLogs([log]);
-      await updateServiceStatToLastBlock(
-        false,
-        "latestSchemaBlockNum",
-        log.blockNumber
-      );
-    }
-  } else if (log.address === EASContractAddress) {
-    if (log.topics[0] === ethers.utils.id(attestedEventSignature)) {
-      await createAttestationsForLogs([log]);
+  if (log.address === EASContractAddress) {
+    if (
+      log.topics[0] === ethers.utils.id(attestedEventSignature) &&
+      log.topics[3] === makeStatementUID
+    ) {
+      await parseAttestationLogs([log]);
       await updateServiceStatToLastBlock(
         false,
         "latestAttestationBlockNum",
         log.blockNumber
       );
-    } else if (log.topics[0] === ethers.utils.id(revokedEventSignature)) {
+    } else if (
+      log.topics[0] === ethers.utils.id(revokedEventSignature) &&
+      log.topics[3] === makeStatementUID
+    ) {
       await revokeAttestationsFromLogs([log]);
       await updateServiceStatToLastBlock(
         false,
         "latestAttestationRevocationBlockNum",
-        log.blockNumber
-      );
-    } else if (log.topics[0] === ethers.utils.id(timestampEventSignature)) {
-      await createTimestampForLogs([log]);
-      await updateServiceStatToLastBlock(
-        false,
-        "latestTimestampBlockNum",
-        log.blockNumber
-      );
-    } else if (
-      log.topics[0] === ethers.utils.id(revokedOffchainEventSignature)
-    ) {
-      await createOffchainRevocationsForLogs([log]);
-      await updateServiceStatToLastBlock(
-        false,
-        "latestOffchainRevocationBlockNum",
         log.blockNumber
       );
     }

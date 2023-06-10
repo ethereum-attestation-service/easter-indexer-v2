@@ -3,14 +3,8 @@ import {
   attestedEventSignature,
   getAndUpdateLatestAttestationRevocations,
   getAndUpdateLatestAttestations,
-  getAndUpdateLatestOffchainRevocations,
-  getAndUpdateLatestSchemas,
-  getAndUpdateLatestTimestamps,
   provider,
-  registeredEventSignature,
   revokedEventSignature,
-  revokedOffchainEventSignature,
-  timestampEventSignature,
   updateDbFromRelevantLog,
 } from "./utils";
 import { startGraph } from "./graph";
@@ -26,11 +20,8 @@ export async function update() {
 
   try {
     running = true;
-    await getAndUpdateLatestSchemas();
     await getAndUpdateLatestAttestations();
     await getAndUpdateLatestAttestationRevocations();
-    await getAndUpdateLatestTimestamps();
-    await getAndUpdateLatestOffchainRevocations();
   } catch (e) {
     console.log("Error!", e);
   }
@@ -43,11 +34,8 @@ async function go() {
   const filter = {
     topics: [
       [
-        ethers.utils.id(registeredEventSignature),
         ethers.utils.id(attestedEventSignature),
         ethers.utils.id(revokedEventSignature),
-        ethers.utils.id(timestampEventSignature),
-        ethers.utils.id(revokedOffchainEventSignature),
       ],
     ],
   };
