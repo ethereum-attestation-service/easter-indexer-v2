@@ -103,6 +103,8 @@ export const makeStatementUID =
   "0x3969bb076acfb992af54d51274c5c868641ca5344e1aacd0b1f5e4f80ac0822f";
 export const likeUID =
   "0x33e9094830a5cba5554d1954310e4fbed2ef5f859ec1404619adea4207f391fd";
+export const usernameUID =
+  "0x1c12bac4f230477c87449a101f5f9d6ca1c492866355c0a5e27026753e5ebf40";
 
 export const provider = new ethers.providers.StaticJsonRpcProvider(
   activeChainConfig.rpcProvider,
@@ -212,24 +214,40 @@ export async function parseAttestationLogs(logs: ethers.providers.Log[]) {
 export async function processCreatedAttestation(
   attestation: Attestation
 ): Promise<void> {
+  const attestingUser = await prisma.user.findUnique({
+    where: { id: attestation.attester },
+  });
+
+  if (!attestingUser) {
+    console.log("Creating new user", attestation.attester);
+
+    await prisma.user.create({
+      data: {
+        id: attestation.attester,
+        name: "",
+        createdAt: attestation.time,
+      },
+    });
+  }
+
+  const recipientUser = await prisma.user.findUnique({
+    where: { id: attestation.recipient },
+  });
+
+  if (!recipientUser) {
+    console.log("Creating new user", attestation.recipient);
+
+    await prisma.user.create({
+      data: {
+        id: attestation.recipient,
+        name: "",
+        createdAt: attestation.time,
+      },
+    });
+  }
+
   if (attestation.schemaId === likeUID) {
     try {
-      const attestingUser = await prisma.user.findUnique({
-        where: { id: attestation.attester },
-      });
-
-      if (!attestingUser) {
-        console.log("Creating new user", attestation.attester);
-
-        await prisma.user.create({
-          data: {
-            id: attestation.attester,
-            name: "",
-            createdAt: attestation.time,
-          },
-        });
-      }
-
       const postToLike = await prisma.post.findUnique({
         where: { id: attestation.refUID },
       });
@@ -249,9 +267,7 @@ export async function processCreatedAttestation(
     } catch (error) {
       console.log("Error processing like attestation", error);
     }
-  }
-
-  if (attestation.schemaId === makeStatementUID) {
+  } else if (attestation.schemaId === makeStatementUID) {
     try {
       const decodedStatementAttestationData =
         ethers.utils.defaultAbiCoder.decode(["string"], attestation.data);
@@ -259,34 +275,6 @@ export async function processCreatedAttestation(
       const attestingUser = await prisma.user.findUnique({
         where: { id: attestation.attester },
       });
-
-      if (!attestingUser) {
-        console.log("Creating new user", attestation.attester);
-
-        await prisma.user.create({
-          data: {
-            id: attestation.attester,
-            name: "",
-            createdAt: attestation.time,
-          },
-        });
-      }
-
-      const recipientUser = await prisma.user.findUnique({
-        where: { id: attestation.recipient },
-      });
-
-      if (!recipientUser) {
-        console.log("Creating new user", attestation.recipient);
-
-        await prisma.user.create({
-          data: {
-            id: attestation.recipient,
-            name: "",
-            createdAt: attestation.time,
-          },
-        });
-      }
 
       let parentId: null | string = null;
 
@@ -309,6 +297,23 @@ export async function processCreatedAttestation(
           id: attestation.id,
           parentId,
           revokedAt: 0,
+        },
+      });
+    } catch (e) {
+      console.log("Error: Unable to decode schema name", e);
+      return;
+    }
+  } else if (attestation.schemaId === usernameUID) {
+    try {
+      const decodedUsernameAttestationData =
+        ethers.utils.defaultAbiCoder.decode(["bytes32"], attestation.data);
+
+      await prisma.user.update({
+        where: { id: attestation.attester },
+        data: {
+          name: ethers.utils.parseBytes32String(
+            decodedUsernameAttestationData[0]
+          ),
         },
       });
     } catch (e) {
@@ -386,7 +391,7 @@ export async function getAndUpdateLatestAttestations() {
       ethers.utils.id(attestedEventSignature),
       null,
       null,
-      [makeStatementUID, likeUID],
+      [makeStatementUID, likeUID, usernameUID],
     ],
   });
 
@@ -429,7 +434,7 @@ export async function updateDbFromRelevantLog(log: ethers.providers.Log) {
   if (log.address === EASContractAddress) {
     if (
       log.topics[0] === ethers.utils.id(attestedEventSignature) &&
-      [makeStatementUID, likeUID].includes(log.topics[3])
+      [makeStatementUID, likeUID, usernameUID].includes(log.topics[3])
     ) {
       await parseAttestationLogs([log]);
       await updateServiceStatToLastBlock(

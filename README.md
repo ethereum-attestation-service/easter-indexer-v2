@@ -1,6 +1,4 @@
-# EAS Indexing Service
-
-This tool allows you to quickly spin up your own EAS indexer on any EVM chain that has EAS contracts deployed
+# EASter Indexing Service
 
 The following command will start the docker service
 

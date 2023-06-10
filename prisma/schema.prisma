@@ -61,6 +61,18 @@ model User {
   likes         Like[]
   retweets      Retweet[]
   createdAt     Int
+  followers     Follow[]  @relation("Followers")
+  following     Follow[]  @relation("Following")
+}
+
+model Follow {
+  id          String @id
+  follower    User   @relation("Following", fields: [followerId], references: [id])
+  followerId  String
+  following   User   @relation("Followers", fields: [followingId], references: [id])
+  followingId String
+  createdAt   Int
+  revokedAt   Int
 }
 
 model Retweet {
