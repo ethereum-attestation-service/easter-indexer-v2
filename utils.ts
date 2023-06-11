@@ -334,25 +334,15 @@ export async function processCreatedAttestation(
       const decodedUsernameAttestationData =
         ethers.utils.defaultAbiCoder.decode(["bool"], attestation.data);
 
-      const existingFollow = await prisma.follow.findFirst({
-        where: {
+      await prisma.follow.create({
+        data: {
+          id: attestation.id,
           followerId: attestation.attester,
           followingId: attestation.recipient,
+          createdAt: attestation.time,
           revokedAt: 0,
         },
       });
-
-      if (!existingFollow) {
-        await prisma.follow.create({
-          data: {
-            id: attestation.id,
-            followerId: attestation.attester,
-            followingId: attestation.recipient,
-            createdAt: attestation.time,
-            revokedAt: 0,
-          },
-        });
-      }
     } catch (e) {
       console.log("Error: Unable to decode schema name", e);
       return;
