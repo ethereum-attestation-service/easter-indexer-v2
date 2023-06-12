@@ -16,7 +16,7 @@ done
 # Run Prisma db push
 npx prisma db push
 
-mpx prisma generate
+npx prisma generate
 
 # Start the application
 yarn start
