@@ -99,8 +99,8 @@ export const revokedEventSignature = "Revoked(address,address,bytes32,bytes32)";
 export const attestedEventSignature =
   "Attested(address,address,bytes32,bytes32)";
 
-export const makeStatementUID =
-  "0x3969bb076acfb992af54d51274c5c868641ca5344e1aacd0b1f5e4f80ac0822f";
+export const makePostUID =
+  "0xbbea47804168571b26f0ea2962bfbd1b11184bc0a438724c890151201eb60128";
 export const likeUID =
   "0x33e9094830a5cba5554d1954310e4fbed2ef5f859ec1404619adea4207f391fd";
 export const usernameUID =
@@ -181,22 +181,22 @@ export async function revokeAttestationsFromLogs(logs: ethers.providers.Log[]) {
   for (let log of logs) {
     const attestation = await easContract.getAttestation(log.data);
 
-    if (attestation.schema === makeStatementUID) {
-      await prisma.post.update({
+    if (attestation.schema === makePostUID) {
+      await prisma.post.updateMany({
         where: { id: attestation.uid },
         data: {
           revokedAt: attestation.revocationTime.toNumber(),
         },
       });
     } else if (attestation.schema === likeUID) {
-      await prisma.like.update({
+      await prisma.like.updateMany({
         where: { id: attestation.uid },
         data: {
           revokedAt: attestation.revocationTime.toNumber(),
         },
       });
     } else if (attestation.schema === followUID) {
-      await prisma.follow.update({
+      await prisma.follow.updateMany({
         where: { id: attestation.uid },
         data: {
           revokedAt: attestation.revocationTime.toNumber(),
@@ -276,7 +276,7 @@ export async function processCreatedAttestation(
     } catch (error) {
       console.log("Error processing like attestation", error);
     }
-  } else if (attestation.schemaId === makeStatementUID) {
+  } else if (attestation.schemaId === makePostUID) {
     try {
       const decodedStatementAttestationData =
         ethers.utils.defaultAbiCoder.decode(["string"], attestation.data);
@@ -366,7 +366,7 @@ export async function getAndUpdateLatestAttestationRevocations() {
       ethers.utils.id(revokedEventSignature),
       null,
       null,
-      [makeStatementUID, likeUID, followUID],
+      [makePostUID, likeUID, followUID],
     ],
   });
 
@@ -418,7 +418,7 @@ export async function getAndUpdateLatestAttestations() {
       ethers.utils.id(attestedEventSignature),
       null,
       null,
-      [makeStatementUID, likeUID, usernameUID, followUID],
+      [makePostUID, likeUID, usernameUID, followUID],
     ],
   });
 
@@ -461,9 +461,7 @@ export async function updateDbFromRelevantLog(log: ethers.providers.Log) {
   if (log.address === EASContractAddress) {
     if (
       log.topics[0] === ethers.utils.id(attestedEventSignature) &&
-      [makeStatementUID, likeUID, usernameUID, followUID].includes(
-        log.topics[3]
-      )
+      [makePostUID, likeUID, usernameUID, followUID].includes(log.topics[3])
     ) {
       await parseAttestationLogs([log]);
       await updateServiceStatToLastBlock(
@@ -473,7 +471,7 @@ export async function updateDbFromRelevantLog(log: ethers.providers.Log) {
       );
     } else if (
       log.topics[0] === ethers.utils.id(revokedEventSignature) &&
-      [makeStatementUID, likeUID, followUID].includes(log.topics[3])
+      [makePostUID, likeUID, followUID].includes(log.topics[3])
     ) {
       await revokeAttestationsFromLogs([log]);
       await updateServiceStatToLastBlock(
