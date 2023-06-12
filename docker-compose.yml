@@ -11,13 +11,14 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - "5432"
+      - "5432:5432"
 
   eas-indexer:
     build: .
     container_name: eas_indexer_container
     environment:
       CHAIN_ID: ${CHAIN_ID}
+      ALCHEMY_SEPOLIA_API_KEY: ${ALCHEMY_SEPOLIA_API_KEY}
       DATABASE_URL: "postgresql://postgres:postgresPassword@eas-postgres:5432/eas-index"
     depends_on:
       - eas-postgres
