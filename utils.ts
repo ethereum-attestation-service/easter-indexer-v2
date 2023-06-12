@@ -227,7 +227,9 @@ export async function processCreatedAttestation(
     where: { id: attestation.attester },
   });
 
-  if (!attestingUser) {
+  const schemasToProcess = [makePostUID, likeUID, followUID, usernameUID];
+
+  if (!attestingUser && schemasToProcess.includes(attestation.schemaId)) {
     console.log("Creating new user", attestation.attester);
 
     await prisma.user.create({
