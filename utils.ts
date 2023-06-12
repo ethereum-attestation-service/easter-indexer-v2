@@ -214,8 +214,6 @@ export async function parseAttestationLogs(logs: ethers.providers.Log[]) {
   const attestations = await Promise.all(promises);
 
   for (let attestation of attestations) {
-    console.log("Adding new attestation", attestation);
-
     await processCreatedAttestation(attestation);
   }
 }
@@ -245,7 +243,7 @@ export async function processCreatedAttestation(
     where: { id: attestation.recipient },
   });
 
-  if (!recipientUser) {
+  if (!recipientUser && schemasToProcess.includes(attestation.schemaId)) {
     console.log("Creating new user", attestation.recipient);
 
     await prisma.user.create({
