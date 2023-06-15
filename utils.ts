@@ -279,7 +279,7 @@ async function processPostAttestation(attestation: Attestation) {
 
           console.log("Resizing image for", urls[0]);
           await sharp(imageRes.data)
-            .resize(600, null, { withoutEnlargement: true })
+            .resize(1000, null, { withoutEnlargement: true })
             .jpeg()
             .toFile(`./uploads/url_previews/${newPost.id}.jpg`);
 
