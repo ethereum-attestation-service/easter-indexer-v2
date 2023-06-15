@@ -43,7 +43,7 @@ model Attestation {
 }
 
 model EnsName {
-  id        String @id
+  id        String @id @unique
   name      String
   timestamp Int
 }
@@ -54,8 +54,9 @@ model ServiceStat {
 }
 
 model User {
-  id            String    @id
+  id            String    @id @unique
   name          String
+  ensName       String    @default("")
   authoredPosts Post[]    @relation("Author")
   receivedPosts Post[]    @relation("Recipient")
   likes         Like[]
