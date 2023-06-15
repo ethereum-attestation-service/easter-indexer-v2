@@ -4,7 +4,18 @@ import { Attestation } from "@prisma/client";
 import dayjs from "dayjs";
 import pLimit from "p-limit";
 import { Eas__factory } from "./types/ethers-contracts";
-import { SchemaEncoder } from "@ethereum-attestation-service/eas-sdk";
+import axios from "axios";
+import cheerio from "cheerio";
+import sharp from "sharp";
+import express from "express";
+
+const app = express();
+
+app.use(express.static("uploads"));
+
+app.listen(6231, () => {
+  console.log("Listening on port 6231");
+});
 
 const limit = pLimit(5);
 
@@ -218,6 +229,82 @@ export async function parseAttestationLogs(logs: ethers.providers.Log[]) {
   }
 }
 
+async function processPostAttestation(attestation: Attestation) {
+  try {
+    const decodedStatementAttestationData = ethers.utils.defaultAbiCoder.decode(
+      ["string"],
+      attestation.data
+    );
+
+    const attestingUser = await prisma.user.findUnique({
+      where: { id: attestation.attester },
+    });
+
+    let parentId: null | string = null;
+
+    if (attestation.refUID !== ethers.constants.HashZero) {
+      const parentPost = await prisma.post.findUnique({
+        where: { id: attestation.refUID },
+      });
+
+      if (parentPost) {
+        parentId = parentPost.id;
+      }
+    }
+
+    const newPost = await prisma.post.create({
+      data: {
+        userId: attestation.attester,
+        createdAt: attestation.time,
+        recipientId: attestation.recipient,
+        content: decodedStatementAttestationData[0],
+        id: attestation.id,
+        parentId,
+        revokedAt: 0,
+      },
+    });
+
+    const urls = extractURLs(decodedStatementAttestationData[0]);
+
+    if (urls.length > 0) {
+      console.log("Fetching link preview for", urls[0]);
+      try {
+        const preview = await fetchMetaTags(urls[0]);
+
+        if (preview.image) {
+          console.log("Downloading image for", urls[0]);
+          const imageRes = await axios.get(preview.image, {
+            responseType: "arraybuffer",
+          });
+
+          console.log("Resizing image for", urls[0]);
+          await sharp(imageRes.data)
+            .resize(600, null, { withoutEnlargement: true })
+            .jpeg()
+            .toFile(`./uploads/url_previews/${newPost.id}.jpg`);
+
+          console.log("Creating link preview for", urls[0]);
+          await prisma.linkPreview.create({
+            data: {
+              postId: newPost.id,
+              title: preview.title,
+              description: preview.description ?? ``,
+              image: `${newPost.id}.jpg`,
+              url: urls[0],
+              createdAt: attestation.time,
+            },
+          });
+        }
+      } catch (e) {
+        console.log("Error: Unable to fetch link preview", e);
+      }
+    }
+  } catch (e) {
+    console.log("Error: Unable to decode schema name", e);
+    return;
+  }
+}
+
 export async function processCreatedAttestation(
   attestation: Attestation
 ): Promise<void> {
@@ -277,41 +364,7 @@ export async function processCreatedAttestation(
       console.log("Error processing like attestation", error);
     }
   } else if (attestation.schemaId === makePostUID) {
-    try {
-      const decodedStatementAttestationData =
-        ethers.utils.defaultAbiCoder.decode(["string"], attestation.data);
-
-      const attestingUser = await prisma.user.findUnique({
-        where: { id: attestation.attester },
-      });
-
-      let parentId: null | string = null;
-
-      if (attestation.refUID !== ethers.constants.HashZero) {
-        const parentPost = await prisma.post.findUnique({
-          where: { id: attestation.refUID },
-        });
-
-        if (parentPost) {
-          parentId = parentPost.id;
-        }
-      }
-
-      await prisma.post.create({
-        data: {
-          userId: attestation.attester,
-          createdAt: attestation.time,
-          recipientId: attestation.recipient,
-          content: decodedStatementAttestationData[0],
-          id: attestation.id,
-          parentId,
-          revokedAt: 0,
-        },
-      });
-    } catch (e) {
-      console.log("Error: Unable to decode schema name", e);
-      return;
-    }
+    await processPostAttestation(attestation);
   } else if (attestation.schemaId === usernameUID) {
     try {
       const decodedUsernameAttestationData =
@@ -482,3 +535,33 @@ export async function updateDbFromRelevantLog(log: ethers.providers.Log) {
     }
   }
 }
+
+function extractURLs(text: string): string[] {
+  const urlRegex =
+    /[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)/g;
+  const urls = text
+    .match(urlRegex)
+    ?.map((url) => `https://${url}`)
+    .filter((url) => !url.includes("@"));
+  return urls || [];
+}
+
+const fetchMetaTags = async (url: string) => {
+  const res = await axios.get(url);
+  const html = await res.data;
+  const $ = cheerio.load(html);
+  const getMetaTag = (name: string) =>
+    $(`meta[name=${name}]`).attr("content") ||
+    $(`meta[property="og:${name}"]`).attr("content") ||
+    $(`meta[property="twitter:${name}"]`).attr("content");
+
+  return {
+    url,
+    title: $("title").first().text(),
+    favicon: $('link[rel="shortcut icon"]').attr("href"),
+    // Add here all the meta tags you need
+    description: getMetaTag("description"),
+    image: getMetaTag("image"),
+    author: getMetaTag("author"),
+  };
+};

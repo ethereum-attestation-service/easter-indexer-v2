@@ -96,18 +96,30 @@ model Like {
   revokedAt Int
 }
 
+model LinkPreview {
+  id          String @id @default(cuid())
+  postId      String @unique
+  post        Post   @relation(fields: [postId], references: [id])
+  url         String
+  title       String
+  image       String
+  description String
+  createdAt   Int
+}
+
 model Post {
-  id          String    @id
-  user        User      @relation("Author", fields: [userId], references: [id])
+  id          String       @id
+  user        User         @relation("Author", fields: [userId], references: [id])
   userId      String
-  recipient   User?     @relation("Recipient", fields: [recipientId], references: [id])
+  recipient   User?        @relation("Recipient", fields: [recipientId], references: [id])
   recipientId String?
   content     String
-  replies     Post[]    @relation("ReplyToPost")
-  parent      Post?     @relation("ReplyToPost", fields: [parentId], references: [id])
+  replies     Post[]       @relation("ReplyToPost")
+  parent      Post?        @relation("ReplyToPost", fields: [parentId], references: [id])
   parentId    String?
   createdAt   Int
   revokedAt   Int
   likes       Like[]
   retweets    Retweet[]
+  linkPreview LinkPreview?
 }
