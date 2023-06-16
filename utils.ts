@@ -552,7 +552,9 @@ const fetchMetaTags = async (url: string) => {
   const $ = cheerio.load(html);
   const getMetaTag = (name: string) =>
     $(`meta[name=${name}]`).attr("content") ||
+    $(`meta[name="og:${name}"]`).attr("content") ||
     $(`meta[property="og:${name}"]`).attr("content") ||
+    $(`meta[name="twitter:${name}"]`).attr("content") ||
     $(`meta[property="twitter:${name}"]`).attr("content");
 
   return {
