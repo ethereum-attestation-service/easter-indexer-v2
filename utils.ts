@@ -7,15 +7,6 @@ import { Eas__factory } from "./types/ethers-contracts";
 import axios from "axios";
 import cheerio from "cheerio";
 import sharp from "sharp";
-import express from "express";
-
-const app = express();
-
-app.use(express.static("uploads"));
-
-app.listen(6231, () => {
-  console.log("Listening on port 6231");
-});
 
 const limit = pLimit(5);
 
@@ -236,10 +227,6 @@ async function processPostAttestation(attestation: Attestation) {
       attestation.data
     );
 
-    const attestingUser = await prisma.user.findUnique({
-      where: { id: attestation.attester },
-    });
-
     let parentId: null | string = null;
 
     if (attestation.refUID !== ethers.constants.HashZero) {
@@ -282,14 +269,16 @@ async function processPostAttestation(attestation: Attestation) {
             .resize(1000, null, { withoutEnlargement: true })
             .jpeg()
             .toFile(`./uploads/url_previews/${newPost.id}.jpg`);
+        }
 
+        if (preview.title) {
           console.log("Creating link preview for", urls[0]);
           await prisma.linkPreview.create({
             data: {
               postId: newPost.id,
               title: preview.title,
               description: preview.description ?? ``,
-              image: `${newPost.id}.jpg`,
+              image: preview.image ? `${newPost.id}.jpg` : "",
               url: urls[0],
               createdAt: attestation.time,
             },
@@ -384,9 +373,6 @@ export async function processCreatedAttestation(
     }
   } else if (attestation.schemaId === followUID) {
     try {
-      const decodedUsernameAttestationData =
-        ethers.utils.defaultAbiCoder.decode(["bool"], attestation.data);
-
       await prisma.follow.create({
         data: {
           id: attestation.id,

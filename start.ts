@@ -8,8 +8,20 @@ import {
   updateDbFromRelevantLog,
 } from "./utils";
 import { startGraph } from "./graph";
-
+import express from "express";
 require("dotenv").config();
+
+const app = express();
+
+app.use(express.static("uploads"));
+
+app.get("/update/:postId", async (req, res) => {
+  const postId = req.params.postId;
+});
+
+app.listen(6231, () => {
+  console.log("Listening on port 6231");
+});
 
 let running = false;
 
