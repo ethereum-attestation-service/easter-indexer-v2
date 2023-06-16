@@ -6,6 +6,7 @@ import {
   provider,
   revokedEventSignature,
   updateDbFromRelevantLog,
+  updatePostMetaData,
 } from "./utils";
 import { startGraph } from "./graph";
 import express from "express";
@@ -17,6 +18,10 @@ app.use(express.static("uploads"));
 
 app.get("/update/:postId", async (req, res) => {
   const postId = req.params.postId;
+
+  await updatePostMetaData(postId);
+
+  res.send("ok");
 });
 
 app.listen(6231, () => {

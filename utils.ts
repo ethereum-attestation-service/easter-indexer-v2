@@ -553,3 +553,64 @@ const fetchMetaTags = async (url: string) => {
     author: getMetaTag("author"),
   };
 };
+
+export async function updatePostMetaData(postId: string) {
+  try {
+    const post = await prisma.post.findUnique({
+      where: { id: postId },
+    });
+
+    if (!post) {
+      return;
+    }
+
+    const urls = extractURLs(post.content);
+
+    if (urls.length > 0) {
+      console.log("Fetching link preview for", urls[0]);
+      try {
+        const preview = await fetchMetaTags(urls[0]);
+
+        if (preview.image) {
+          console.log("Downloading image for", urls[0]);
+          const imageRes = await axios.get(preview.image, {
+            responseType: "arraybuffer",
+          });
+
+          console.log("Resizing image for", urls[0]);
+          await sharp(imageRes.data)
+            .resize(1000, null, { withoutEnlargement: true })
+            .jpeg()
+            .toFile(`./uploads/url_previews/${post.id}.jpg`);
+        }
+
+        if (preview.title) {
+          console.log("Creating link preview for", urls[0]);
+          await prisma.linkPreview.upsert({
+            where: { postId: post.id },
+            update: {
+              title: preview.title,
+              description: preview.description ?? ``,
+              image: preview.image ? `${post.id}.jpg` : "",
+              url: urls[0],
+              createdAt: post.createdAt,
+            },
+            create: {
+              postId: post.id,
+              title: preview.title,
+              description: preview.description ?? ``,
+              image: preview.image ? `${post.id}.jpg` : "",
+              url: urls[0],
+              createdAt: post.createdAt,
+            },
+          });
+        }
+      } catch (e) {
+        console.log("Error: Unable to fetch link preview", e);
+      }
+    }
+  } catch (e) {
+    console.log("Error: Unable to decode schema name", e);
+    return;
+  }
+}
