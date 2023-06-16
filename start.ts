@@ -14,9 +14,9 @@ require("dotenv").config();
 
 const app = express();
 
-app.use(express.static("uploads"));
+app.use("/uploads", express.static("uploads"));
 
-app.get("/update/:postId", async (req, res) => {
+app.get("/updateMeta/:postId", async (req, res) => {
   const postId = req.params.postId;
 
   await updatePostMetaData(postId);
